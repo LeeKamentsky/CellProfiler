@@ -139,6 +139,7 @@ import cellprofiler.cpimage as cpi
 import cellprofiler.measurements as cpmeas
 import cellprofiler.settings as cps
 import cellprofiler.preferences as cpp
+from cellprofiler.cpmath.activecountour import active_contour
 from cellprofiler.cpmath.otsu import otsu
 from cellprofiler.cpmath.cpmorphology import fill_labeled_holes, strel_disk
 from cellprofiler.cpmath.cpmorphology import binary_shrink, relabel
@@ -195,7 +196,7 @@ LIMIT_ERASE = "Erase"
 
 class IdentifyPrimaryObjects(cpmi.Identify):
             
-    variable_revision_number = 9
+    variable_revision_number = 10
     category =  "Object Processing"
     module_name = "IdentifyPrimaryObjects"
     
@@ -260,6 +261,38 @@ class IdentifyPrimaryObjects(cpmi.Identify):
         
         self.create_threshold_settings()
         
+        self.wants_active_contours = cps.Binary(
+            "Regularize objects?", False,
+            doc = """
+            <b>IdentifyPrimaryObjects</b> can regularize objects by making the
+            object borders smoother. It weighs three factors as it changes
+            the object outlines:<br><ul>
+            <li><i>Curvature</i>: <b>IdentifyPrimaryObjects</b> tries to smooth
+            out sharp angles in the outlines</li>
+            <li><i>Intensity</i>: <b>IdentifyPrimaryObjects</b> tries to maximize
+            the difference between the average intensity inside the objects
+            and outside the objects. This means, it is more willing to include
+            a bright pixel in an object as it regularizes than a dim one.</li>
+            <li><i>Original shape</i>: <b>IdentifyPrimaryObjects</b> tries to
+            maintain the original shape of the objects</li>.<br>
+            The method used is as described in Chan et. al., "Active Contours Without Edges", 
+            IEEE Transactions on Image Processing, vol. 10, # 2, Febuary 2001, p 266
+            """)
+        self.max_iters = cps.Integer(
+            "Number of iterations", 20, minval=1,
+            doc = """
+            The number of iterations performed during regularization. The method
+            does not detect convergence as it adjusts shape. A larger number
+            of iterations will give you a more exact estimate and may change
+            the shape of objects more than a small number. A larger number
+            will also take longer to run.""")
+        self.alpha = cps.Float(
+            "Smoothness", .2, minval=.0001, maxval=.9999,
+            doc = """
+            The smoothness is a parameter that balances how much attention is
+            paid to curvature. A small number will make less change in the
+            curvature than a larger number. A larger number will remove more
+            sharp corners in the objects.""")
         self.unclump_method = cps.Choice(
             'Method to distinguish clumped objects', 
             [UN_INTENSITY, UN_SHAPE, UN_LOG, UN_NONE], doc="""\
@@ -490,7 +523,9 @@ class IdentifyPrimaryObjects(cpmi.Identify):
                 self.wants_automatic_log_diameter, self.log_diameter,
                 self.limit_choice, self.maximum_object_count,
                 self.thresholding_measurement,
-                self.adaptive_window_method, self.adaptive_window_size]
+                self.adaptive_window_method, self.adaptive_window_size,
+                self.wants_active_contours, self.max_iters, 
+                self.alpha]
     
     def upgrade_settings(self, setting_values, variable_revision_number, 
                          module_name, from_matlab):
@@ -610,8 +645,13 @@ class IdentifyPrimaryObjects(cpmi.Identify):
             
         if (not from_matlab) and variable_revision_number == 8:
             # Added adaptive thresholding settings
-            setting_values += [FI_IMAGE_SIZE, "10"]
+            setting_values = setting_values + [FI_IMAGE_SIZE, "10"]
             variable_revision_number = 9
+            
+        if (not from_matlab) and variable_revision_number == 9:
+            # added active contours
+            setting_values = setting_values + [ cps.NO, "20", ".2" ]
+            variable_revision_number = 10
             
         return setting_values, variable_revision_number, from_matlab
             
@@ -638,6 +678,9 @@ class IdentifyPrimaryObjects(cpmi.Identify):
                 self.manual_log_threshold,
                 self.threshold_correction_factor, 
                 self.threshold_range,
+                self.wants_active_contours,
+                self.max_iters,
+                self.alpha,
                 self.unclump_method,
                 self.watershed_method, 
                 self.automatic_smoothing, 
@@ -655,6 +698,9 @@ class IdentifyPrimaryObjects(cpmi.Identify):
         vv = [self.image_name,self.object_name,self.size_range,
               self.exclude_size, self.merge_objects,
               self.exclude_border_objects] + self.get_threshold_visible_settings()
+        vv += [ self.wants_active_contours ]
+        if self.wants_active_contours:
+            vv += [self.max_iters, self.alpha]
         vv += [ self.unclump_method ]
         if self.unclump_method != UN_NONE:
             if self.unclump_method == UN_LOG:
@@ -724,6 +770,11 @@ class IdentifyPrimaryObjects(cpmi.Identify):
         #
         if self.fill_holes.value:
             binary_image = fill_labeled_holes(binary_image)
+        # Perform active contour if desired
+        if self.wants_active_contours:
+            binary_image = active_contour(img, binary_image, 
+                                          self.max_iters.value,
+                                          self.alpha.value)
 
         labeled_image,object_count = scipy.ndimage.label(binary_image,
                                                          np.ones((3,3),bool))
