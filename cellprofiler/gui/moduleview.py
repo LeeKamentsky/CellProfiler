@@ -520,7 +520,8 @@ class ModuleView:
                     if control is not None:
                         control.filter_panel_controller.update()
                     else:
-                        fc = FilterPanelController(self, v, control)
+                        fc = FilterPanelController(self.module_panel,
+                                                   v, self.on_value_change)
                         control = fc.panel
                         control.filter_panel_controller = fc
                 elif isinstance(v, cps.FileCollectionDisplay):
@@ -2096,12 +2097,23 @@ class FilterPanelController(object):
     The code for handling the filter UI is moderately massive, so it gets
     its own class, if for no other reason than to organize the code.
     '''
-    def __init__(self, module_view, v, panel):
-        assert isinstance(module_view, ModuleView)
+    def __init__(self, parent, v, fn_on_value_change):
+        '''Initialize the FilterPanelController
+        
+        parent - parent window to the filter panel
+        v - the filter setting
+        fn_on_value_change - call this function when the setting's value changes.
+            The signature is:
+            fn_on_change(v, panel, new_text, event, timeout)
+            where v is the setting, panel is the filter panel
+            new_text is the new setting value, event is the event
+            triggering the change and timeout is how long to wait
+            before updating the UI (probably obsolete)
+        '''
         assert isinstance(v, cps.Filter)
-        self.module_view = module_view
+        self.fn_on_value_change = fn_on_value_change
         self.v = v
-        self.panel = wx.Panel(self.module_view.module_panel,
+        self.panel = wx.Panel(parent,
                               style = wx.TAB_TRAVERSAL,
                               name = edit_control_name(self.v))
         self.panel.Sizer = wx.BoxSizer(wx.VERTICAL)
@@ -2230,7 +2242,7 @@ class FilterPanelController(object):
     
     def on_value_change(self, event, new_text, timeout=None):
         if not self.inside_update:
-            self.module_view.on_value_change(
+            self.fn_on_value_change(
                 self.v, self.panel, new_text, event, timeout)
             
     def make_delete_button(self, address):

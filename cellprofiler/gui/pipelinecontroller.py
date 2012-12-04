@@ -43,7 +43,7 @@ from errordialog import display_error_dialog, ED_CONTINUE, ED_STOP, ED_SKIP
 from errordialog import display_error_message
 from runmultiplepipelinesdialog import RunMultplePipelinesDialog
 from cellprofiler.modules.loadimages import C_FILE_NAME, C_PATH_NAME, C_FRAME
-from cellprofiler.modules.loadimages import pathname2url
+from cellprofiler.modules.loadimages import pathname2url, url2pathname
 import cellprofiler.gui.parametersampleframe as psf
 import cellprofiler.analysis as cpanalysis
 import cellprofiler.cpmodule as cpmodule
@@ -753,7 +753,8 @@ class PipelineController:
         
     PATHLIST_CMD_SHOW = "Show image"
     PATHLIST_CMD_REMOVE = "Remove from list"
-    PATHLIST_CMD_REFRESH = "Refresh"
+    PATHLIST_CMD_REFRESH = "Refresh this folder"
+    PATHLIST_CMD_REFRESH_ALL = "Refresh this folder and all subfolders"
     def get_pathlist_file_context_menu(self, paths):
         return ((self.PATHLIST_CMD_SHOW, self.PATHLIST_CMD_SHOW),
                 (self.PATHLIST_CMD_REMOVE, self.PATHLIST_CMD_REMOVE))
@@ -768,18 +769,45 @@ class PipelineController:
             self.on_pathlist_file_delete(paths)
 
     def get_pathlist_folder_context_menu(self, path):
-        return ((self.PATHLIST_CMD_REMOVE, self.PATHLIST_CMD_REMOVE),
-                (self.PATHLIST_CMD_REFRESH, self.PATHLIST_CMD_REFRESH))
+        if path.startswith("file:"):
+            return ((self.PATHLIST_CMD_REMOVE, self.PATHLIST_CMD_REMOVE),
+                    (self.PATHLIST_CMD_REFRESH, self.PATHLIST_CMD_REFRESH),
+                    (self.PATHLIST_CMD_REFRESH_ALL, self.PATHLIST_CMD_REFRESH_ALL))
+        else:
+            return ((self.PATHLIST_CMD_REMOVE, self.PATHLIST_CMD_REMOVE),)
     
     def on_pathlist_folder_command(self, path, cmd):
         if cmd == self.PATHLIST_CMD_REMOVE:
             paths = self.__path_list_ctrl.get_folder(
                 path, self.__path_list_ctrl.FLAG_RECURSE)
             self.on_pathlist_file_delete(paths)
-        elif cmd == self.PATHLIST_CMD_REFRESH:
-            W.walk_in_background(path, 
+        elif cmd == self.PATHLIST_CMD_REFRESH_ALL:
+            #
+            # Clear in anticipation of finding all
+            #
+            paths = self.__path_list_ctrl.get_folder(
+                path, self.__path_list_ctrl.FLAG_RECURSE)
+            self.on_pathlist_file_delete(paths)
+            #
+            # Hand off to background walker
+            #
+            folder = url2pathname(path)
+            W.walk_in_background(folder, 
                                  self.on_walk_callback, 
                                  self.on_walk_completed)
+        elif cmd == self.PATHLIST_CMD_REFRESH:
+            #
+            # Clear single directory in anticipation of finding all
+            #
+            paths = self.__path_list_ctrl.get_folder(path)
+            self.on_pathlist_file_delete(paths)
+            
+            folder = url2pathname(path)
+            paths = [os.path.join(folder,filename)
+                     for filename in os.listdir(folder)]
+            urls = [pathname2url(p) for p in paths
+                    if os.path.isfile(p)]
+            self.add_urls(urls)
     
     def on_pathlist_file_delete(self, paths):
         self.__pipeline.remove_image_plane_details(
@@ -826,13 +854,9 @@ class PipelineController:
     def on_walk_callback(self, dirpath, dirnames, filenames):
         '''Handle an iteration of file walking'''
         
-        hdf_file_list = self.__workspace.get_file_list()
         file_list = [pathname2url(os.path.join(dirpath, filename))
                      for filename in filenames]
-        hdf_file_list.add_files_to_filelist(file_list)
-        self.__pipeline.add_image_plane_details([
-            cpp.ImagePlaneDetails(url, None, None, None)
-            for url in file_list])
+        self.add_urls(file_list)
         
     def on_walk_completed(self):
         pass
