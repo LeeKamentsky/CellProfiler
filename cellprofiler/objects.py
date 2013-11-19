@@ -15,6 +15,8 @@ Website: http://www.cellprofiler.org
 import decorator
 import numpy as np
 from scipy.sparse import coo_matrix
+import h5py
+import weakref
 
 from cellprofiler.cpmath.cpmorphology import all_connected_components
 from cellprofiler.cpmath.outline import outline
@@ -64,6 +66,8 @@ class Objects(object):
             label_stack = [l for l,c in self.get_labels()]
             assert len(label_stack) == 1, "Operation failed because objects overlapped. Please try with non-overlapping objects"
             return label_stack[0]
+        elif isinstance(self.__segmented, h5py.Dataset):
+            return np.array(self.__segmented)
         return self.__segmented
     
     def set_segmented(self,labels):
@@ -92,14 +96,27 @@ class Objects(object):
         and the label at the pixel in slot 2.
         '''
         if self.__ijv is None and self.__segmented is not None:
-            i,j = np.argwhere(self.__segmented > 0).transpose()
+            hibernate = isinstance(self.__segmented, h5py.Dataset)
+            segmented = np.array(self.__segmented)
+            i,j = np.argwhere(segmented > 0).transpose()
             #
             # Sort so that same "i" coordinates are close together
             # so that memory accesses are localized.
             #
             order = np.lexsort((j,i))
             i,j = i[order],j[order]
-            self.__ijv = np.column_stack((i,j,self.__segmented[i,j]))
+            ijv = np.column_stack((i,j,segmented[i,j]))
+            if hibernate:
+                if self.HDF5_IJV in self.__segmented.parent:
+                    del self.__segmented.parent[self.HDF5_IJV]
+                self.__segmented.parent[self.HDF5_IJV] = ijv
+            else:
+                self.__ijv = ijv
+            return ijv
+        elif isinstance(self.__ijv, h5py.Dataset):
+            if len(self.__ijv) == 0:
+                return np.zeros((0, 3), int)
+            return np.array(self.__ijv)
         return self.__ijv
     
     ijv = property(get_ijv, set_ijv)
@@ -131,8 +148,9 @@ class Objects(object):
         returns a list of label matrixes and the indexes in each
         '''
         if self.__segmented is not None:
-            return [(self.__segmented, self.indices)]
+            return [(np.array(self.__segmented), self.indices)]
         elif self.__ijv is not None:
+            ijv = self.ijv
             if shape is None:
                 shape = self.__shape
             def ijv_to_segmented(ijv, shape=shape):
@@ -150,13 +168,13 @@ class Objects(object):
                     labels[ijv[:,0],ijv[:,1]] = ijv[:,2]
                 return labels
             
-            if len(self.__ijv) == 0:
-                return [(ijv_to_segmented(self.__ijv), self.indices)]
+            if len(ijv) == 0:
+                return [(ijv_to_segmented(ijv), self.indices)]
             
-            sort_order = np.lexsort((self.__ijv[:,2],
-                                     self.__ijv[:,1], 
-                                     self.__ijv[:,0]))
-            sijv = self.__ijv[sort_order]
+            sort_order = np.lexsort((ijv[:,2],
+                                     ijv[:,1], 
+                                     ijv[:,0]))
+            sijv = ijv[sort_order]
             #
             # Locations in sorted array where i,j are same consecutively
             # are locations that have an overlap.
@@ -175,7 +193,7 @@ class Objects(object):
             sijv = sijv[counts[indexer.rev_idx] > 1, :]
             counts = counts[counts > 1]
             if len(counts) == 0:
-                return [(ijv_to_segmented(self.__ijv), self.indices)]
+                return [(ijv_to_segmented(ijv), self.indices)]
             #
             # There are n * n-1 pairs for each coordinate (n = # labels)
             # n = 1 -> 0 pairs, n = 2 -> 2 pairs, n = 3 -> 6 pairs
@@ -262,9 +280,9 @@ class Objects(object):
             #
             result = []
             for color in np.unique(v_color):
-                ijv = self.__ijv[v_color[self.__ijv[:,2]] == color]
+                ijvc = ijv[v_color[ijv[:,2]] == color]
                 indices = np.arange(1, len(v_color))[v_color[1:] == color]
-                result.append((ijv_to_segmented(ijv), indices))
+                result.append((ijv_to_segmented(ijvc), indices))
             return result
         else:
             return []
@@ -281,6 +299,8 @@ class Objects(object):
         segmented labeling.
         """
         if self.__unedited_segmented != None:
+            if isinstance(self.__unedited_segmented, h5py.Dataset):
+                return np.array(self.__unedited_segmented)
             return self.__unedited_segmented
         return self.segmented
     
@@ -304,6 +324,8 @@ class Objects(object):
         or the image mask still present.
         """
         if self.__small_removed_segmented != None:
+            if isinstance(self.__small_removed_segmented, h5py.Dataset):
+                return np.array(self.__small_removed_segmented)
             return self.__small_removed_segmented
         return self.unedited_segmented
     
@@ -588,6 +610,41 @@ class Objects(object):
         return function(image,
                 self.segmented,
                 self.indices)
+    
+    HDF5_SEGMENTED = "segmented"
+    HDF5_SEGMENTED_SMALL_REMOVED = "smallremoved"
+    HDF5_SEGMENTED_UNEDITED = "unedited"
+    HDF5_IJV = "ijv"
+    
+    def hibernate(self, group):
+        '''Hibernate these objects by storing their arrays in an HDF5 group
+        
+        group - store in this group
+        '''
+        none_or_hdf5 = (h5py.Dataset, type(None))
+        if not isinstance(self.__segmented, none_or_hdf5):
+            if self.HDF5_SEGMENTED in group:
+                del group[self.HDF5_SEGMENTED]
+            group[self.HDF5_SEGMENTED] = self.__segmented
+            self.__segmented = group[self.HDF5_SEGMENTED]
+            
+        if not isinstance(self.__unedited_segmented, none_or_hdf5):
+            if self.HDF5_SEGMENTED_UNEDITED in group:
+                del group[self.HDF5_SEGMENTED_UNEDITED]
+            group[self.HDF5_SEGMENTED_UNEDITED] = self.__unedited_segmented
+            self.__unedited_segmented = group[self.HDF5_SEGMENTED_UNEDITED]
+        
+        if not isinstance(self.__small_removed_segmented, none_or_hdf5):
+            if self.HDF5_SEGMENTED_SMALL_REMOVED in group:
+                del group[self.HDF5_SEGMENTED_SMALL_REMOVED]
+            group[self.HDF5_SEGMENTED_SMALL_REMOVED] = self.__small_removed_segmented
+            self.__small_removed_segmented = group[self.HDF5_SEGMENTED_SMALL_REMOVED]
+            
+        if not isinstance(self.__ijv, none_or_hdf5):
+            if self.HDF5_IJV in group:
+                del group[self.HDF5_IJV]
+            group[self.HDF5_IJV] = self.__ijv
+            self.__ijv = group[self.HDF5_IJV]
 
 def check_consistency(segmented, unedited_segmented, small_removed_segmented):
     """Check the three components of Objects to make sure they are consistent
@@ -595,11 +652,22 @@ def check_consistency(segmented, unedited_segmented, small_removed_segmented):
     assert segmented == None or np.all(segmented >= 0)
     assert unedited_segmented == None or np.all(unedited_segmented >= 0)
     assert small_removed_segmented == None or np.all(small_removed_segmented >= 0)
-    assert segmented == None or segmented.ndim == 2, "Segmented label matrix must have two dimensions, has %d"%(segmented.ndim)
-    assert unedited_segmented == None or unedited_segmented.ndim == 2, "Unedited segmented label matrix must have two dimensions, has %d"%(unedited_segmented.ndim)
-    assert small_removed_segmented == None or small_removed_segmented.ndim == 2, "Small removed segmented label matrix must have two dimensions, has %d"%(small_removed_segmented.ndim)
-    assert segmented == None or unedited_segmented == None or segmented.shape == unedited_segmented.shape, "Segmented %s and unedited segmented %s shapes differ"%(repr(segmented.shape),repr(unedited_segmented.shape))
-    assert segmented == None or small_removed_segmented == None or segmented.shape == small_removed_segmented.shape, "Segmented %s and small removed segmented %s shapes differ"%(repr(segmented.shape),repr(small_removed_segmented.shape))
+    assert segmented == None or len(segmented.shape) == 2,\
+           "Segmented label matrix must have two dimensions, has %d" % len(segmented.shape)
+    assert unedited_segmented == None or len(unedited_segmented.shape) == 2,\
+           "Unedited segmented label matrix must have two dimensions, has %d" %\
+           len(unedited_segmented.shape)
+    assert small_removed_segmented == None or len(small_removed_segmented.shape) == 2,\
+           "Small removed segmented label matrix must have two dimensions, has %d"%\
+           len(small_removed_segmented.shape)
+    assert segmented == None or unedited_segmented == None or\
+           segmented.shape == unedited_segmented.shape,\
+           "Segmented %s and unedited segmented %s shapes differ" %\
+           (repr(segmented.shape),repr(unedited_segmented.shape))
+    assert segmented == None or small_removed_segmented == None or\
+           segmented.shape == small_removed_segmented.shape,\
+           "Segmented %s and small removed segmented %s shapes differ"%\
+           (repr(segmented.shape),repr(small_removed_segmented.shape))
    
 
 class ObjectSet(object):
@@ -617,6 +685,16 @@ class ObjectSet(object):
         """
         self.__can_overwrite = can_overwrite
         self.__types_and_instances = {OBJECT_TYPE_NAME:{} }
+        self.__measurements = None
+    
+    def set_measurements(self, measurements):
+        '''Set the Measurements object to be used for hibernating objects.
+        
+        measurements - the measurements to use. The HDF5 backing store will
+                       be used to persist the objects.
+                       
+        '''
+        self.__measurements = weakref.ref(measurements)
         
     @property
     def __objects_by_name(self):
@@ -627,6 +705,10 @@ class ObjectSet(object):
         assert ((not self.__objects_by_name.has_key(name)) or
                 self.__can_overwrite), "The object, %s, is already in the object set"%(name)
         self.__objects_by_name[name] = objects
+        if self.__measurements is not None:
+            m = self.__measurements()
+            if m is not None:
+                m.hibernate_objects(objects, name)
     
     def get_object_names(self):
         """Return the names of all of the objects

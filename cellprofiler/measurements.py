@@ -1541,8 +1541,17 @@ class Measurements(object):
             self.clear_image(name)
         for provider in old_providers:
             self.providers.remove(provider)
+        self.hibernate_image(image, name)
         provider = VanillaImageProvider(name,image)
         self.providers.append(provider)
+        
+    def hibernate_image(self, image, name):
+        group = self.hdf5_dict.hdf5_file.require_group("/Temp/Images")
+        image.hibernate(group.require_group(name))
+        
+    def hibernate_objects(self, objects, name):
+        group = self.hdf5_dict.hdf5_file.require_group("/Temp/Objects")
+        objects.hibernate(group.require_group(name))
         
     def set_channel_descriptors(self, channel_descriptors):
         '''Write the names and data types of the channel descriptors

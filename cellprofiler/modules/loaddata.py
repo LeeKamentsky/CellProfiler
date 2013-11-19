@@ -1057,6 +1057,7 @@ class LoadData(cpm.CPModule):
                         workspace.display_data.warning = warning
                     else:
                         print warning
+                m.hibernate_image(image, image_name)
         #
         # Process any object tags
         #

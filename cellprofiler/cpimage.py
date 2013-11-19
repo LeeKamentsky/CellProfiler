@@ -19,6 +19,7 @@ import logging
 import numpy as np
 import math
 import sys
+import h5py
 
 from struct import unpack
 from zlib import decompress
@@ -92,6 +93,8 @@ class Image(object):
         
     def get_image(self):
         """Return the primary image"""
+        if isinstance(self.__image, h5py.Dataset):
+            return np.array(self.__image)
         return self.__image
     
     def set_image(self,image,convert=True):
@@ -204,6 +207,8 @@ class Image(object):
         """Return the mask (pixels to be considered) for the primary image
         """
         if not self.__mask == None:
+            if isinstance(self.__mask, h5py.Dataset):
+                return np.array(self.__mask)
             return self.__mask
         
         if self.has_masking_objects:
@@ -245,6 +250,8 @@ class Image(object):
     def get_crop_mask(self):
         """Return the mask used to crop this image"""
         if not self.__crop_mask == None:
+            if isinstance(self.__crop_mask, h5py.Dataset):
+                return np.array(self.__crop_mask)
             return self.__crop_mask
         
         if self.has_masking_objects:
@@ -353,6 +360,33 @@ class Image(object):
         return self.__scale
     scale = property(get_scale)
     
+    HDF5_PIXEL_DATA = "PixelData"
+    HDF5_MASK = "Mask"
+    HDF5_CROP_MASK = "CropMask"
+    
+    def hibernate(self, group):
+        '''Put this image into hibernation mode
+        
+        Store the image and mask arrays in the given hdf5 group in order
+        to free memory.
+        '''
+        if not isinstance(self.__image, h5py.Dataset):
+            if self.HDF5_PIXEL_DATA in group:
+                del group[self.HDF5_PIXEL_DATA]
+            group[self.HDF5_PIXEL_DATA] = self.__image
+            self.__image = group[self.HDF5_PIXEL_DATA]
+        if not isinstance(self.__mask, (h5py.Dataset, type(None))):
+            if self.HDF5_MASK in group:
+                del group[self.HDF5_MASK]
+            group[self.HDF5_MASK] = self.__mask
+            self.__mask = group[self.HDF5_MASK]
+            
+        if not isinstance(self.__crop_mask, (h5py.Dataset, type(None))):
+            if self.HDF5_CROP_MASK in group:
+                del group[self.HDF5_CROP_MASK]
+            group[self.HDF5_CROP_MASK] = self.__crop_mask
+            self.__crop_mask = group[self.HDF5_CROP_MASK]
+            
 def crop_image(image, crop_mask,crop_internal = False):
     """Crop an image to the size of the nonzero portion of a crop mask"""
     i_histogram = crop_mask.sum(axis=1)

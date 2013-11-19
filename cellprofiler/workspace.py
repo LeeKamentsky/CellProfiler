@@ -93,6 +93,8 @@ class Workspace(object):
         self.interaction_handler = None
         self.post_run_display_handler = None
         self.post_group_display_handler = None
+        if self.__object_set is not None:
+            self.__object_set.set_measurements(measurements)
 
         class DisplayData(object):
             pass
