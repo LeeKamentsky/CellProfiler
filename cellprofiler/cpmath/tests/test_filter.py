@@ -123,26 +123,10 @@ class TestMedianFilter(unittest.TestCase):
         max_acceptable = sorted[202]
         self.assertTrue(np.all(result >= min_acceptable))
         self.assertTrue(np.all(result <= max_acceptable))
-        
+    
     def test_03_01_shape(self):
         '''Make sure the median filter is the expected octagonal shape'''
-        
-        radius = 5
-        a_2 = int(radius / 2.414213)
-        i,j = np.mgrid[-10:11,-10:11]
-        octagon = np.ones((21,21), bool)
-        #
-        # constrain the octagon mask to be the points that are on
-        # the correct side of the 8 edges
-        #
-        octagon[i < -radius] = False
-        octagon[i > radius]  = False
-        octagon[j < -radius] = False
-        octagon[j > radius]  = False
-        octagon[i+j < -radius-a_2] = False
-        octagon[j-i >  radius+a_2] = False
-        octagon[i+j >  radius+a_2] = False
-        octagon[i-j >  radius+a_2] = False
+        octagon = get_octagon()
         np.random.seed(0)
         img = np.random.uniform(size=(21,21))
         result = F.median_filter(img, np.ones((21,21),bool), radius)
@@ -1925,3 +1909,50 @@ class TestPoissonEquation(unittest.TestCase):
         i, j = i[mask], j[mask]
         expected = (p[i+1, j] + p[i-1, j] + p[i, j+1] + p[i, j-1]) / 4 + 1
         np.testing.assert_almost_equal(p[mask], expected, 0)
+        
+class TestMedianFilter3D(unittest.TestCase):
+    def test_01_01_filter_no_mask(self):
+        r = np.random.RandomState(101)
+        i, j, k = np.mgrid[-12:13, -12:13, 0:10]
+        i = i & 15
+        j = j & 15
+        image = i*16 + j
+        #image[:, :, :] = 100
+        #image[:, 0, :] = np.arange(250).reshape(25, 10)
+        #image[0, 1, :5] = np.arange(250, 255)
+        #image[image >= 102] += 1
+        #image[12, 12, 0] = 102
+        octagon = get_octagon()
+        coords = np.argwhere(octagon)-10
+        expected = np.zeros(i.shape[:2])
+        for i in range(expected.shape[0]):
+            for j in range(expected.shape[1]):
+                ij = np.array([i, j])
+                c = coords + ij[np.newaxis, :]
+                mask = (c[:, 0] >= 0) & (c[:, 1] >= 0) & \
+                    (c[:, 0] < expected.shape[0]) & (c[:, 1] < expected.shape[1])
+                c = c[mask]
+                expected[i, j] = np.median(image[c[:, 0], c[:, 1]])
+        result = F.median_filter3d(image, np.ones(image.shape[:2], bool), 5)
+        self.assertTrue(np.all(np.abs(expected - result) < 1))
+
+def get_octagon():
+    '''Return a binary mask of an octagon of radius 5'''
+    radius = 5
+    a_2 = int(radius / 2.414213)
+    i,j = np.mgrid[-10:11,-10:11]
+    octagon = np.ones((21,21), bool)
+    #
+    # constrain the octagon mask to be the points that are on
+    # the correct side of the 8 edges
+    #
+    octagon[i < -radius] = False
+    octagon[i > radius]  = False
+    octagon[j < -radius] = False
+    octagon[j > radius]  = False
+    octagon[i+j < -radius-a_2] = False
+    octagon[j-i >  radius+a_2] = False
+    octagon[i+j >  radius+a_2] = False
+    octagon[i-j >  radius+a_2] = False
+    return octagon
+

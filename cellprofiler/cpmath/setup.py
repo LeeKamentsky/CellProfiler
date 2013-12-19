@@ -68,6 +68,11 @@ def configuration():
                             include_dirs=['src']+[get_include()],
                             extra_compile_args=extra_compile_args,
                             extra_link_args=extra_link_args),
+                  Extension(name="_3dmedianfilter",
+                            sources=["_3dmedianfilter.pyx"],
+                            include_dirs=['src']+[get_include()],
+                            extra_compile_args=extra_compile_args,
+                            extra_link_args=extra_link_args),
                   ]
     dict = { "name":"cpmath",
              "description":"algorithms for CellProfiler",
