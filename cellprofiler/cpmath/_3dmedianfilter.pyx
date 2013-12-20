@@ -41,8 +41,6 @@ ctypedef np.int32_t pixel_count_t
 ctypedef np.uint8_t mask_t
 ctypedef np.float32_t output_t
 
-cdef:
-    bad_val = 182
 ###########
 #
 # Histograms
@@ -403,145 +401,24 @@ cdef class M3DState:
             np.int32_t col
             output_t *ptr
         assert not self.done()
-        #with nogil:
-        if True:
-            print "Processing raster %d" % ph.current_row
-            init_row(ph)
+        init_row(ph)
+        with nogil:
             if ph.current_row >= 0:
                 for col from 0 <= col < ph.column_count:
                     ph.current_column = col
-                    print "Updating column %d" % col
                     update_current_location(ph)
-                    print "Accumulating column %d" % col
                     accumulate(ph)
-                    print "finding median for column %d" % col
                     ptr = ph.output + ph.current_row * ph.row_stride +\
                           col * ph.col_stride
                     find_median(ph, ptr)
             else:
                 for col from 0 <= col < ph.column_count:
                     ph.current_column = col
-                    print "Updating column %d" % col
                     update_current_location(ph)
-                    print "Accumulating column %d" % col
                     accumulate(ph)
             finish_row(ph)
             ph.current_row += 1
     
-    def active_coordinates(self):
-        cdef:
-            SCoord *pSCoord
-        for i in range(self.n_indexes):
-            pSCoord = self.pActiveSCoords[i]
-            print "%s: idx = %d, i0=%d, j0=%d, data=%x, mask=%x, data_stride=%d, mask_stride=%d" % (
-                pSCoord.name, self.scoord_indexes[i], 
-                pSCoord.i0, pSCoord.j0,
-                <Py_intptr_t>pSCoord.data, <Py_intptr_t>pSCoord.mask,
-                pSCoord.stride_j, pSCoord.mask_stride)
-                
-    def saved_accumulator(self):
-        cdef:
-            object result = np.zeros(sizeof(HistogramPiece)/sizeof(pixel_count_t), np.uint32)
-        (<HistogramPiece *>np.PyArray_DATA(result))[0] = self.histograms.saved_accumulator
-        return result
-        
-    def accumulator(self):
-        cdef:
-            Histograms *ph = &self.histograms
-        a = np.zeros(sizeof(HistogramPiece)/sizeof(pixel_count_t), np.int32)
-        (<HistogramPiece *>np.PyArray_DATA(a))[0] = self.histograms.accumulator
-        return a[:16], a[16:]
-    
-    def top_left(self):
-        cdef:
-            Histograms *ph = &self.histograms
-            int i
-        a = np.zeros((ph.stripe_length, 
-                      sizeof(HistogramPiece)/sizeof(pixel_count_t)), np.int32)
-        for i from 0<=i<ph.stripe_length:
-            (<HistogramPiece *>np.PyArray_DATA(a))[i] = ph.histograms[i].top_left
-        return a[:,:16], a[:, 16:]
-            
-    def top_right(self):
-        cdef:
-            Histograms *ph = &self.histograms
-            int i
-        a = np.zeros((ph.stripe_length, 
-                      sizeof(HistogramPiece)/sizeof(pixel_count_t)), np.int32)
-        for i from 0<=i<ph.stripe_length:
-            (<HistogramPiece *>np.PyArray_DATA(a))[i] = ph.histograms[i].top_right
-        return a[:,:16], a[:, 16:]
-            
-    def edge(self):
-        cdef:
-            Histograms *ph = &self.histograms
-            int i
-        a = np.zeros((ph.stripe_length, 
-                      sizeof(HistogramPiece)/sizeof(pixel_count_t)), np.int32)
-        for i from 0<=i<ph.stripe_length:
-            (<HistogramPiece *>np.PyArray_DATA(a))[i] = ph.histograms[i].edge
-        return a[:,:16], a[:, 16:]
-
-    def bottom_left(self):
-        cdef:
-            Histograms *ph = &self.histograms
-            int i
-        a = np.zeros((ph.stripe_length, 
-                      sizeof(HistogramPiece)/sizeof(pixel_count_t)), np.int32)
-        for i from 0<=i<ph.stripe_length:
-            (<HistogramPiece *>np.PyArray_DATA(a))[i] = ph.histograms[i].bottom_left
-        return a[:,:16], a[:, 16:]
-
-    def bottom_right(self):
-        cdef:
-            Histograms *ph = &self.histograms
-            int i
-        a = np.zeros((ph.stripe_length, 
-                      sizeof(HistogramPiece)/sizeof(pixel_count_t)), np.int32)
-        for i from 0<=i<ph.stripe_length:
-            (<HistogramPiece *>np.PyArray_DATA(a))[i] = ph.histograms[i].bottom_right
-        return a[:,:16], a[:, 16:]
-
-    def tl_br_colidx(self, colidx):
-        cdef:
-            Histograms *ph = &self.histograms
-        return tl_br_colidx(ph, colidx)
-        
-    def tr_bl_colidx(self, colidx):
-        cdef:
-            Histograms *ph = &self.histograms
-        return tr_bl_colidx(ph, colidx)
-        
-    def leading_edge_colidx(self, colidx):
-        cdef:
-            Histograms *ph = &self.histograms
-        return leading_edge_colidx(ph, colidx)
-        
-    def trailing_edge_colidx(self, colidx):
-        cdef:
-            Histograms *ph = &self.histograms
-        return trailing_edge_colidx(ph, colidx)
-        
-    def stripe_length(self):
-        cdef:
-            Histograms *ph = &self.histograms
-        return ph.stripe_length
-        
-    def radius(self):
-        cdef:
-            Histograms *ph = &self.histograms
-        return ph.radius
-        
-    def current_row(self):
-        cdef:
-            Histograms *ph = &self.histograms
-        return ph.current_row
-        
-    def row_count(self):
-        cdef:
-            Histograms *ph = &self.histograms
-        return ph.row_count
-
 ############################################################################    
 #
 # <tl,tr,bl,br>_colidx - convert a column index into the histogram
@@ -605,7 +482,7 @@ cdef inline void add16(pixel_count_t *dest, pixel_count_t *src) nogil:
     dest[14] += src[14]
     dest[15] += src[15]
 
-cdef inline int sub16(pixel_count_t *dest, pixel_count_t *src) except -1:
+cdef inline void sub16(pixel_count_t *dest, pixel_count_t *src) nogil:
     dest[0]  -= src[0]
     dest[1]  -= src[1]
     dest[2]  -= src[2]
@@ -622,7 +499,6 @@ cdef inline int sub16(pixel_count_t *dest, pixel_count_t *src) except -1:
     dest[13] -= src[13]
     dest[14] -= src[14]
     dest[15] -= src[15]
-    return 0
 
 ############################################################################    
 #
@@ -633,7 +509,7 @@ cdef inline int sub16(pixel_count_t *dest, pixel_count_t *src) except -1:
 # colidx - the index of the column to add
 #
 ############################################################################    
-cdef inline int accumulate_coarse_histogram(Histograms *ph, np.int32_t colidx) except -1:
+cdef inline void accumulate_coarse_histogram(Histograms *ph, np.int32_t colidx) nogil:
     cdef:
         int offset
 
@@ -641,21 +517,14 @@ cdef inline int accumulate_coarse_histogram(Histograms *ph, np.int32_t colidx) e
     if ph.pixel_count[offset].top_right > 0:
         add16(ph.accumulator.coarse, ph.histograms[offset].top_right.coarse)
         ph.accumulator_count += ph.pixel_count[offset].top_right
-        print "Accumulated %d pixels from top right slot %d" % (
-            ph.pixel_count[offset].top_right, offset)
     offset = leading_edge_colidx(ph, colidx)
     if ph.pixel_count[offset].edge > 0:
         add16(ph.accumulator.coarse, ph.histograms[offset].edge.coarse)
         ph.accumulator_count += ph.pixel_count[offset].edge
-        print "Accumulated %d pixels from leading edge slot %d" % (
-            ph.pixel_count[offset].edge, offset)
     offset = tl_br_colidx(ph, colidx)
     if ph.pixel_count[offset].bottom_right > 0:
         add16(ph.accumulator.coarse, ph.histograms[offset].bottom_right.coarse)
         ph.accumulator_count += ph.pixel_count[offset].bottom_right
-        print "Accumulated %d pixels from bottom right slot %d" % (
-            ph.pixel_count[offset].bottom_right, offset)
-    return 0
 
 ############################################################################    
 #
@@ -663,20 +532,18 @@ cdef inline int accumulate_coarse_histogram(Histograms *ph, np.int32_t colidx) e
 #                                 for a given column
 #
 ############################################################################    
-cdef inline int deaccumulate_coarse_histogram(Histograms *ph, np.int32_t colidx) except -1:
+cdef inline void deaccumulate_coarse_histogram(Histograms *ph, np.int32_t colidx) nogil:
     cdef:
         int offset
     #
     # The trailing diagonals don't appear until here
     #
     if colidx <= ph.a_2:
-        return 0
+        return
     offset = tl_br_colidx(ph, colidx)
     if ph.pixel_count[offset].top_left > 0:
         sub16(ph.accumulator.coarse, ph.histograms[offset].top_left.coarse)
         ph.accumulator_count -= ph.pixel_count[offset].top_left
-        print "Deaccumulated %d pixels from top left slot %d" % (
-            ph.pixel_count[offset].top_left, offset)
     #
     # The trailing edge doesn't appear from the border until here
     #
@@ -685,15 +552,10 @@ cdef inline int deaccumulate_coarse_histogram(Histograms *ph, np.int32_t colidx)
         if ph.pixel_count[offset].edge > 0:
             sub16(ph.accumulator.coarse, ph.histograms[offset].edge.coarse)
             ph.accumulator_count -= ph.pixel_count[offset].edge
-            print "Deaccumulated %d pixels from trailing edge slot %d" % (
-                ph.pixel_count[offset].edge, offset)
     offset = tr_bl_colidx(ph, colidx)
     if ph.pixel_count[offset].bottom_left > 0:
         sub16(ph.accumulator.coarse, ph.histograms[offset].bottom_left.coarse)
         ph.accumulator_count -= ph.pixel_count[offset].bottom_left
-        print "Deaccumulated %d pixels from bottom left slot %d" % (
-            ph.pixel_count[offset].bottom_left, offset)
-    return 0
     
 ############################################################################    
 #
@@ -719,9 +581,9 @@ cdef inline void accumulate_fine_histogram(Histograms *ph,
 # deaccumulate_fine_histogram - subtract one of the 16 fine histograms
 #
 ############################################################################    
-cdef inline int deaccumulate_fine_histogram(Histograms *ph, 
+cdef inline void deaccumulate_fine_histogram(Histograms *ph, 
                                              np.int32_t colidx,
-                                             np.uint32_t fineidx) except -1:
+                                             np.uint32_t fineidx) nogil:
     cdef:
         int fineoffset = fineidx * 16
         int offset
@@ -730,7 +592,7 @@ cdef inline int deaccumulate_fine_histogram(Histograms *ph,
     # The trailing diagonals don't appear until here
     #
     if colidx < ph.a_2:
-        return 0
+        return
     offset = tl_br_colidx(ph, colidx)
     sub16(ph.accumulator.fine+fineoffset, ph.histograms[offset].top_left.fine+fineoffset)
     if colidx >= ph.radius:
@@ -738,7 +600,7 @@ cdef inline int deaccumulate_fine_histogram(Histograms *ph,
         sub16(ph.accumulator.fine+fineoffset, ph.histograms[offset].edge.fine+fineoffset)
     offset = tr_bl_colidx(ph, colidx)
     sub16(ph.accumulator.fine+fineoffset, ph.histograms[offset].bottom_left.fine+fineoffset)
-    return 0
+    return
     
 ############################################################################    
 #
@@ -746,11 +608,9 @@ cdef inline int deaccumulate_fine_histogram(Histograms *ph,
 #
 ############################################################################    
 
-cdef inline void accumulate(Histograms *ph):
+cdef inline void accumulate(Histograms *ph) nogil:
     accumulate_coarse_histogram(ph, ph.current_column)
     deaccumulate_coarse_histogram(ph, ph.current_column)
-    update_fine(ph, int(bad_val/16))
-    print "Count at %d: %d" % (bad_val, ph.accumulator.fine[bad_val])
 
 ############################################################################    
 #
@@ -772,18 +632,16 @@ cdef inline void accumulate(Histograms *ph):
 #    to choose remains to be done.
 ############################################################################    
 
-cdef inline int update_fine(Histograms *ph, int fineidx) except -1:
+cdef inline void update_fine(Histograms *ph, int fineidx) nogil:
     cdef:
         int first_update_column = ph.last_update_column[fineidx]+1
         int update_limit        = ph.current_column+1
         int i
  
-    print "Updating fine @%d from %d to %d" % (fineidx, first_update_column, update_limit-1)
     for i from first_update_column <= i < update_limit:
         accumulate_fine_histogram(ph, i, fineidx)
         deaccumulate_fine_histogram(ph, i, fineidx)
     ph.last_update_column[fineidx] = ph.current_column
-    return 0
 
 ############################################################################    
 #
@@ -797,11 +655,11 @@ cdef inline int update_fine(Histograms *ph, int fineidx) except -1:
 # coord      - coordinate and stride of pixel to add
 # 
 ############################################################################    
-cdef inline int update_histogram(Histograms *ph,
+cdef inline void update_histogram(Histograms *ph,
                                   HistogramPiece *hist_piece,
                                   pixel_count_t *pixel_count,
                                   SCoord *last_coord,
-                                  SCoord *coord) except -1:
+                                  SCoord *coord) nogil:
     cdef:
         np.int32_t current_column = ph.current_column
         np.int32_t current_row    = ph.current_row
@@ -822,17 +680,6 @@ cdef inline int update_histogram(Histograms *ph,
     j = coord.j0 + current_column
     i = coord.i0 + current_row
 
-    print "updating %s (%d,%d)/%s (%d,%d) at %d,%d" %(
-        last_coord.name, il, jl, coord.name, i, j,
-        current_row, current_column)
-    print "%d tot pixels: %d, %d, %d, %d, %d, %d, %d, %d %d, %d, %d, %d, %d, %d, %d, %d" %(
-        pixel_count[0], 
-        hist_piece.coarse[0], hist_piece.coarse[1], hist_piece.coarse[2], hist_piece.coarse[3],
-        hist_piece.coarse[4], hist_piece.coarse[5], hist_piece.coarse[6], hist_piece.coarse[7],
-        hist_piece.coarse[8], hist_piece.coarse[9], hist_piece.coarse[10], hist_piece.coarse[11],
-        hist_piece.coarse[12], hist_piece.coarse[13], hist_piece.coarse[14], hist_piece.coarse[15])
-
-    assert ((<Py_intptr_t>last_coord.data) != 0) or (il < 0) or (il >= row_count) 
     cptr = hist_piece.coarse
     fptr = hist_piece.fine
     if (jl >= 0 and jl < column_count and
@@ -883,13 +730,6 @@ cdef inline int update_histogram(Histograms *ph,
             cptr[cidx] -= acc
             fidx += 16
 
-        print "After %s: %d tot pixels: %d, %d, %d, %d, %d, %d, %d, %d %d, %d, %d, %d, %d, %d, %d, %d" %(
-            last_coord.name, pixel_count[0], 
-            hist_piece.coarse[0], hist_piece.coarse[1], hist_piece.coarse[2], hist_piece.coarse[3],
-            hist_piece.coarse[4], hist_piece.coarse[5], hist_piece.coarse[6], hist_piece.coarse[7],
-            hist_piece.coarse[8], hist_piece.coarse[9], hist_piece.coarse[10], hist_piece.coarse[11],
-            hist_piece.coarse[12], hist_piece.coarse[13], hist_piece.coarse[14], hist_piece.coarse[15])
-    assert ((<Py_intptr_t>coord.data) != 0) or (i < 0) or (i >= row_count) 
     if (j >= 0 and j < column_count and
         i >= 0 and i < row_count and
         coord.mask[coord.mask_stride*j]):
@@ -933,13 +773,6 @@ cdef inline int update_histogram(Histograms *ph,
             pixel_count[0] += acc
             cptr[cidx] += acc
             fidx += 16
-        print "After %s: %d tot pixels: %d, %d, %d, %d, %d, %d, %d, %d %d, %d, %d, %d, %d, %d, %d, %d" %(
-            coord.name, pixel_count[0], 
-            hist_piece.coarse[0], hist_piece.coarse[1], hist_piece.coarse[2], hist_piece.coarse[3],
-            hist_piece.coarse[4], hist_piece.coarse[5], hist_piece.coarse[6], hist_piece.coarse[7],
-            hist_piece.coarse[8], hist_piece.coarse[9], hist_piece.coarse[10], hist_piece.coarse[11],
-            hist_piece.coarse[12], hist_piece.coarse[13], hist_piece.coarse[14], hist_piece.coarse[15])
-    return 0
 
 ############################################################################    
 #
@@ -947,7 +780,7 @@ cdef inline int update_histogram(Histograms *ph,
 #
 ############################################################################    
 #cdef inline void update_current_location(Histograms *ph) nogil:
-cdef inline int update_current_location(Histograms *ph) except -1:
+cdef inline void update_current_location(Histograms *ph) nogil:
     cdef:
         np.int32_t current_column   = ph.current_column
         np.int32_t radius           = ph.radius
@@ -957,19 +790,6 @@ cdef inline int update_current_location(Histograms *ph) except -1:
         np.int32_t bottom_right_off = tl_br_colidx(ph, current_column)
         np.int32_t leading_edge_off = leading_edge_colidx(ph, current_column)
 
-    assert top_left_off >= 0
-    assert top_right_off >= 0
-    assert bottom_left_off >= 0
-    assert bottom_right_off >= 0
-    assert leading_edge_off >= 0
-    assert top_left_off < ph.stripe_length
-    assert top_right_off < ph.stripe_length
-    assert bottom_left_off < ph.stripe_length
-    assert bottom_right_off < ph.stripe_length
-    assert leading_edge_off < ph.stripe_length
-    print "--- Updating histograms: top left/bottom right=%d, top right/bottom left=%d, leading edge=%d, trailing edge=%d" % (
-        top_left_off, top_right_off, leading_edge_off,
-        trailing_edge_colidx(ph, current_column))
     update_histogram(ph, &ph.histograms[top_left_off].top_left,
                      &ph.pixel_count[top_left_off].top_left,
                      &ph.last_top_left,
@@ -1001,7 +821,7 @@ cdef inline int update_current_location(Histograms *ph) except -1:
 #
 ############################################################################
 
-cdef inline int init_row(Histograms *ph) except -1:
+cdef inline void init_row(Histograms *ph):
     cdef:
         np.int32_t tl_off, br_off
         np.int32_t tr_off, bl_off
@@ -1017,8 +837,6 @@ cdef inline int init_row(Histograms *ph) except -1:
     tr_off        = tr_bl_colidx(ph, -radius)
     bl_off        = tr_bl_colidx(ph, -radius)
 
-    print "Clearing top_left: %d, bottom_right: %d, top_right: %d, bottom_left: %d" % (
-        tl_off, br_off, tr_off, bl_off)
     memset(&ph.histograms[tl_off].top_left, 0, sizeof(HistogramPiece))
     memset(&ph.histograms[br_off].bottom_right, 0, sizeof(HistogramPiece))
     memset(&ph.histograms[tr_off].top_right, 0, sizeof(HistogramPiece))
@@ -1038,29 +856,24 @@ cdef inline int init_row(Histograms *ph) except -1:
     # Update locations and coarse accumulator for the octagon
     # for points before 0
     #
-    #with nogil:
-    if True:
+    with nogil:
         for col from -radius <= col < 0:
             ph.current_column = col
-            print "Updating column %d" %col
             update_current_location(ph)
-            print "Accumulating column %d" %col
             accumulate(ph)
-    return 0
         
 ############################################################################
 #
 # finish_row - Process the trailing edge of the octagon at the end of a row
 #
 ############################################################################
-cdef inline int finish_row(Histograms *ph) except -1:
+cdef inline void finish_row(Histograms *ph) nogil:
     cdef:
         np.int32_t col
     for col from ph.column_count <= col <= ph.column_count + ph.radius:
         ph.current_column = col
         update_current_location(ph)
         accumulate(ph)
-    return 0
             
 ############################################################################
 #
@@ -1069,7 +882,7 @@ cdef inline int finish_row(Histograms *ph) except -1:
 ############################################################################
 
 @cython.cdivision(True)
-cdef inline int find_median(Histograms *ph, output_t *ptr) except -1:
+cdef inline void find_median(Histograms *ph, output_t *ptr) nogil:
     cdef:
         pixel_count_t pixels_below      # of pixels below the median
         int i
@@ -1083,9 +896,7 @@ cdef inline int find_median(Histograms *ph, output_t *ptr) except -1:
     j = ph.current_column
          
     if ph.accumulator_count == 0:
-        print "No pixels accumulated for %d, %d" % (i, j)
-        ptr[0] = 0
-        return 0
+        return
     pixels_below = (ph.accumulator_count * ph.percent + 50) / 100 # +50 for roundoff
     if pixels_below > 0:
         pixels_below -= 1
@@ -1107,7 +918,7 @@ cdef inline int find_median(Histograms *ph, output_t *ptr) except -1:
                 for k from j+1 <= k <(i+1)*16:
                     if ph.accumulator.fine[k] > 0:
                         ptr[0] = (<output_t>(j+k)) / 2.0
-                        return 0
+                        return
                 #
                 # Check coarse, then update fine to find next
                 #
@@ -1118,10 +929,7 @@ cdef inline int find_median(Histograms *ph, output_t *ptr) except -1:
                             if ph.accumulator.fine[l] > 0:
                                 break
                     ptr[0] = (<output_t>(j+l)) / 2.0
-                    return 0
+                    return
             ptr[0] = j
-            return 0
-    print "Coarse + fine pixels summed to %d but target is %d" % (
-        accumulator, pixels_below)
+            return
     ptr[0] = 0
-    return 0
