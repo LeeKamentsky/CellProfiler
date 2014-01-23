@@ -18,9 +18,19 @@ cimport cython
 cdef struct Heapitem:
     np.int32_t value
     np.int32_t age
-    np.int32_t index
+    np.int32_t index[0]
+    
+cdef struct Heapitem1:
+    np.int32_t value
+    np.int32_t age
+    np.int32_t index[1]
+    
+cdef struct Heapitem4:
+    np.int32_t value
+    np.int32_t age
+    np.int32_t index[4]
 
-cdef inline int smaller(Heapitem *a, Heapitem *b):
+cdef inline int smaller(Heapitem *a, Heapitem *b) nogil:
     if a.value <> b.value:
       return a.value < b.value
     return a.age < b.age
