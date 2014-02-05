@@ -27,10 +27,20 @@ Please see the AUTHORS file for credits.
 Website: http://www.cellprofiler.org
 """
 
+import logging
+logger = logging.getLogger(__name__)
 
 from _heapq import heapify, heappush, heappop
 import numpy as np
 import scipy.ndimage
+try:
+    import puuul
+    HAS_PUUUL = True
+except:
+    logger.info("multithreaded watershed requires puuul package")
+    logger.info("puuul is available as source from http://github.com/LeeKamentsky/puuul")
+    HAS_PUUUL = False
+    
 from cellprofiler.cpmath.rankorder import rank_order
 
 import _watershed
@@ -483,3 +493,99 @@ def tiled_watershed(image, seed_locations, labels,
                               (target_coords >= np.array(active_tiles.shape))):
                         continue
                     active_tiles[tuple(target_coords)] = True
+
+if HAS_PUUUL:
+    def parallel_watershed(image, seed_locations, labels,
+                           structure, output, lower_distance = None, 
+                           tile_shape = None, mask=None, pool = None):
+        """Label an image using the watershed algorithm and tiles using threads
+        
+        image - a matrix where the lowest value points are
+                labeled first.
+                
+        seed_locations - an Nx(image.ndim) array of locations of the watershed
+                         seeds, one seed per row
+                         
+        seed_labels - the labels to be assigned to those seeds
+        
+        structure - an Nx(image.ndim) array of offsets for the structuring element.
+                    For instance, a 2-d four-connected structure is
+                    [[-1, 0], [0, 1], [1, 0], [0, -1]]
+                    
+        output - the array that receives the labeling
+        
+        lower_distance - a scratchpad for storing one intermediate np.int32 per pixel
+                         if None, allocate one
+                         
+        tile_shape - the shape of a tile. If None, we use megapixel tiles.
+        
+        mask    - don't label points in the mask
+        
+        pool - the puuul.ThreadPool. Defaults to the default thread pool which
+               must have been previously started by the application.
+        """
+        if tile_shape is None:
+            if np.prod(image.shape) < (2 ** 24) / pool.n_threads:
+                #
+                # For a small image, use approximately one tile per
+                # thread.
+                #
+                dx = max(int(np.floor(np.sqrt(float(pool.n_threads)))), 1)
+                tile_shape = np.array(image.shape)
+                tile_shape[0] = tile_shape[0] / dx
+                tile_shape[1] = tile_shape[1] / dx
+            else:
+                # Break everything into 16 mb blocks by default. If image is
+                # less than 
+                # 2d = 4K x 4k
+                # 3d = 256 x 256 x 256
+                # 4d = 64 x 64 x 64 x 64
+                # 5d cry
+                assert image.ndim < 5, "Please supply a tile shape"
+                tile_shape = tuple([2**(24/image.ndim)]*image.ndim)
+        tile_shape = np.array(tile_shape)
+        if lower_distance == None:
+            lower_distance = np.zeros(list(image.shape)+[2], np.int32)
+        n_tiles = ((np.array(image.shape) + tile_shape - 1) / tile_shape).astype(int)
+        tile_grid = np.mgrid[
+            tuple([slice(0, end, ts) for end, ts in zip(image.shape, tile_shape)])]
+        tile_coords = np.column_stack([x.flatten() for x in tile_grid])
+        tile_ends = np.minimum(tile_coords + tile_shape, np.array(image.shape))
+        tiles = [
+            Tile(np.column_stack((c, e))) for c, e in zip(tile_coords, tile_ends)]
+        tile_array = np.array(tiles).reshape(n_tiles)
+        
+        stride = np.hstack(([1], np.cumprod(n_tiles[-2::-1])))[::-1]
+        seed_address = np.sum(stride * (seed_locations / tile_shape).astype(int), 1)
+        tasks = []
+        for i, tile in enumerate(tiles):
+            tseed_locs = np.where(seed_address == i)
+            tseeds = seed_locations[tseed_locs]
+            tlabels = labels[tseed_locs]
+            task = pool.do(
+                tile.initial_segmentation,
+                image, tseeds, tlabels, structure, mask, output, lower_distance)
+            tasks.append(task)
+        for task in tasks:
+            task()
+        
+        active_tiles = np.ones(n_tiles, bool)
+        while np.any(active_tiles):
+            at_coords = np.argwhere(active_tiles)
+            active_tiles.fill(False)
+            tasks = []
+            for coords in at_coords:
+                tile = tile_array[tuple(coords)]
+                task = pool.do(
+                    tile.propagate_border,
+                    image, structure, mask, output, lower_distance)
+                tasks.append((task, coords))
+            for task, coords in tasks:
+                if task():
+                    for scoords in np.sign(structure).astype(int):
+                        target_coords = scoords + coords
+                        if np.any((target_coords < 0) | 
+                                  (target_coords >= np.array(active_tiles.shape))):
+                            continue
+                        active_tiles[tuple(target_coords)] = True
+    
