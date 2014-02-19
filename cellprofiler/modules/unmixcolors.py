@@ -465,7 +465,7 @@ class UnmixColors(cpm.CPModule):
     def display(self, workspace, figure):
         '''Display all of the images in a figure'''
         if self.method == METHOD_CHOOSE_STAINS:
-            image_names = [output.image_name.value for output in outputs]
+            image_names = [output.image_name.value for output in self.outputs]
         else:
             image_names = [self.outputs[0].image_name.value,
                            self.second_output_image.value]
