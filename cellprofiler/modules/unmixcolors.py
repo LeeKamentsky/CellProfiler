@@ -26,9 +26,25 @@ Please note that if you are looking to simply split a color image into red, gree
 components, use the <b>ColorToGray</b> module rather than <b>UnmixColors</b>.
 
 <h4>Technical notes</h4>
-This code is adapted from the ImageJ plugin, <i>Colour_Deconvolution.java</i>
+This code for unmixing by color choice is adapted from the ImageJ plugin, 
+<i>Colour_Deconvolution.java</i>
 (described <a href="http://www.dentistry.bham.ac.uk/landinig/software/cdeconv/cdeconv.html">here</a>)
 written by A.C. Ruifrok, whose paper forms the basis for this code.
+<br>
+The code for automatically unmixing is a novel algorithm of our own design.
+The algorithm assumes
+that the logorithm of pixel values plotted in color-space 
+(x = red, y = green, z = blue) fall on a plane. The first eigenvector of the
+eigenvalue decomposition of the pixel values points along the direction of
+the plane of the combined intensity of the two stains. The second eigenvector 
+points along the direction that differentiates between the two stains, giving
+the fraction of the absorbence of each. The unmixed intensity of each stain
+is the intensity given by the first eigenvector times the fraction given
+by the second eigenvector. It is assumed that each image has both unstained
+and completely stained pixels of each stain and this gives a uniformly balanced
+unmixing on every image. The direction of the second eigenvector is determined
+by the user's stain choice - the eigenvector direction is adjusted so that
+the first output image is most like the user's stain choice.
 
 <h4>References</h4>
 <ul>
@@ -51,6 +67,7 @@ See also <b>ColorToGray</b>.
 
 import numpy as np
 from scipy.linalg import lstsq
+from sklearn.decomposition import PCA
 
 import cellprofiler.cpmodule as cpm
 import cellprofiler.settings as cps
@@ -163,13 +180,41 @@ STAINS_BY_POPULARITY = (
     CHOICE_ORANGE_G, CHOICE_METHYL_BLUE, CHOICE_PONCEAU_FUCHSIN, 
     CHOICE_METHYL_BLUE, CHOICE_FEULGEN)
 
-FIXED_SETTING_COUNT = 2
+FIXED_SETTING_COUNT_V2 = 2
+FIXED_SETTING_COUNT_V3 = 4
+FIXED_SETTING_COUNT = 4
 VARIABLE_SETTING_COUNT = 5
+
+METHOD_CHOOSE_STAINS = "Choose stains"
+METHOD_TWO_COLOR_UNMIXING = "Two-color unmixing"
+FIRST_OUTPUT_IMAGE = "First output image"
+NAME_THE_OUTPUT_NAME = "Name the output name"
+
+STAIN_TABLE = """            <table><tr><th>Stain</th><th>Color</th><th>Specific to</th></tr>
+            <tr><td>%(CHOICE_AEC)s (3-Amino-9-ethylcarbazole)</td><td bgcolor="%(COLOR_AEC)s">&nbsp;</td><td>Peroxidase</td></tr>
+            <tr><td>%(CHOICE_ALICAN_BLUE)s</td><td bgcolor="%(COLOR_ALICAN_BLUE)s">&nbsp;</td><td>Mucopolysaccharides</td></tr>
+            <tr><td>%(CHOICE_ANILINE_BLUE)s</td><td bgcolor="%(COLOR_ANILINE_BLUE)s">&nbsp;</td><td>Pollen tubes</td></tr>
+            <tr><td>%(CHOICE_AZOCARMINE)s</td><td bgcolor="%(COLOR_AZOCARMINE)s">&nbsp;</td><td>Plasma</td></tr>
+            <tr><td>%(CHOICE_DAB)s</td><td bgcolor="%(COLOR_DAB)s">&nbsp;</td><td>Peroxisomes, mitochondria</td></tr>
+            <tr><td>%(CHOICE_EOSIN)s</td><td bgcolor="%(COLOR_EOSIN)s">&nbsp;</td><td>Elastic, collagen and reticular fibers</td></tr>
+            <tr><td>%(CHOICE_FAST_RED)s</td><td bgcolor="%(COLOR_FAST_RED)s">&nbsp;</td><td>Nuclei</td></tr>
+            <tr><td>%(CHOICE_FAST_BLUE)s</td><td bgcolor="%(COLOR_FAST_BLUE)s">&nbsp;</td><td>Myelin fibers</td></tr>
+            <tr><td>%(CHOICE_FEULGEN)s</td><td bgcolor="%(COLOR_FEULGEN)s">&nbsp;</td><td>DNA</td></tr>
+            <tr><td>%(CHOICE_HEMATOXYLIN)s</td><td bgcolor="%(COLOR_HEMATOXYLIN)s">&nbsp;</td><td>Nucleic acids, endoplasmic reticulum</td></tr>
+            <tr><td>%(CHOICE_HEMATOXYLIN_AND_PAS)s</td><td bgcolor="%(COLOR_HEMATOXYLIN_AND_PAS)s">&nbsp;</td><td>Nucleus (stained with both Hematoxylin and PAS)</td></tr>
+            <tr><td>%(CHOICE_METHYL_BLUE)s</td><td bgcolor="%(COLOR_METHYL_BLUE)s">&nbsp;</td><td>Collagen</td></tr>
+            <tr><td>%(CHOICE_METHYL_GREEN)s</td><td bgcolor="%(COLOR_METHYL_GREEN)s">&nbsp;</td><td>Chromatin</td></tr>
+            <tr><td>%(CHOICE_METHYLENE_BLUE)s</td><td bgcolor="%(COLOR_METHYLENE_BLUE)s">&nbsp;</td><td>Nuclei</td></tr>
+            <tr><td>%(CHOICE_ORANGE_G)s</td><td bgcolor="%(COLOR_ORANGE_G)s">&nbsp;</td><td>Erythrocytes, pancreas, pituitary</td></tr>
+            <tr><td>%(CHOICE_PAS)s</td><td bgcolor="%(COLOR_PAS)s">&nbsp;</td><td>Glycogen, carbohydrates</td></tr>
+            <tr><td>%(CHOICE_PONCEAU_FUCHSIN)s</td><td bgcolor="%(COLOR_PONCEAU_FUCHSIN)s">&nbsp;</td><td>Red counterstain for Masson's trichrome</td></tr>
+            </table>
+"""
 
 class UnmixColors(cpm.CPModule):
     module_name = "UnmixColors"
     category = "Image Processing"
-    variable_revision_number = 2
+    variable_revision_number = 3
     
     def create_settings(self):
         self.outputs = []
@@ -180,6 +225,25 @@ class UnmixColors(cpm.CPModule):
             Choose the name of the histologically stained color image
             loaded or created by some prior module.""")
         
+        self.method = cps.Choice(
+            "Unmixing method", [METHOD_CHOOSE_STAINS, METHOD_TWO_COLOR_UNMIXING],
+            doc = """Choose the method to use to umix colors:<br>
+            <ul><li><i>%(METHOD_CHOOSE_STAINS)s</i>: Choose multiple stains
+            to unmix from a list. This method uses fixed constants that
+            approximate colors of common stains to perform the unmixing</li>
+            <li><i>%(METHOD_TWO_COLOR_UNMIXING)s</i>: Automatically calculate
+            the colors of the two stains based on the image and perform the
+            unmixing. This method calculates the colors of the two stains
+            used in the image and separates the signal into intensities for
+            each stain.</li></ul>""" % globals())
+        
+        self.second_output_image = cps.ImageNameProvider(
+            "Second output image", "Eosin",
+        doc="""<i>(Used only if %(METHOD_TWO_COLOR_UNMIXING)s is used)</i><br>
+        This is the name to be given to the intensity image of the second
+        stain to be unmixed. The color of this stain will be automatically
+        calculated and need not be selected.
+        """)
         self.add_image(False)
         
         self.add_image_button = cps.DoSomething(
@@ -199,7 +263,7 @@ class UnmixColors(cpm.CPModule):
         default_name = default_name.replace(" ","")
         
         group.append("image_name", cps.ImageNameProvider(
-            "Name the output name", default_name,doc = """
+            NAME_THE_OUTPUT_NAME, default_name,doc = """
             Use this setting to name one of the images produced by the
             module for a particular stain. The image can be used in
             subsequent modules in the pipeline."""))
@@ -211,25 +275,7 @@ class UnmixColors(cpm.CPModule):
             Use this setting to choose the absorbance values for a
             particular stain. The stains are:
             <br>
-            <table><tr><th>Stain</th><th>Color</th><th>Specific to</th></tr>
-            <tr><td>%(CHOICE_AEC)s (3-Amino-9-ethylcarbazole)</td><td bgcolor="%(COLOR_AEC)s">&nbsp;</td><td>Peroxidase</td></tr>
-            <tr><td>%(CHOICE_ALICAN_BLUE)s</td><td bgcolor="%(COLOR_ALICAN_BLUE)s">&nbsp;</td><td>Mucopolysaccharides</td></tr>
-            <tr><td>%(CHOICE_ANILINE_BLUE)s</td><td bgcolor="%(COLOR_ANILINE_BLUE)s">&nbsp;</td><td>Pollen tubes</td></tr>
-            <tr><td>%(CHOICE_AZOCARMINE)s</td><td bgcolor="%(COLOR_AZOCARMINE)s">&nbsp;</td><td>Plasma</td></tr>
-            <tr><td>%(CHOICE_DAB)s</td><td bgcolor="%(COLOR_DAB)s">&nbsp;</td><td>Peroxisomes, mitochondria</td></tr>
-            <tr><td>%(CHOICE_EOSIN)s</td><td bgcolor="%(COLOR_EOSIN)s">&nbsp;</td><td>Elastic, collagen and reticular fibers</td></tr>
-            <tr><td>%(CHOICE_FAST_RED)s</td><td bgcolor="%(COLOR_FAST_RED)s">&nbsp;</td><td>Nuclei</td></tr>
-            <tr><td>%(CHOICE_FAST_BLUE)s</td><td bgcolor="%(COLOR_FAST_BLUE)s">&nbsp;</td><td>Myelin fibers</td></tr>
-            <tr><td>%(CHOICE_FEULGEN)s</td><td bgcolor="%(COLOR_FEULGEN)s">&nbsp;</td><td>DNA</td></tr>
-            <tr><td>%(CHOICE_HEMATOXYLIN)s</td><td bgcolor="%(COLOR_HEMATOXYLIN)s">&nbsp;</td><td>Nucleic acids, endoplasmic reticulum</td></tr>
-            <tr><td>%(CHOICE_HEMATOXYLIN_AND_PAS)s</td><td bgcolor="%(COLOR_HEMATOXYLIN_AND_PAS)s">&nbsp;</td><td>Nucleus (stained with both Hematoxylin and PAS)</td></tr>
-            <tr><td>%(CHOICE_METHYL_BLUE)s</td><td bgcolor="%(COLOR_METHYL_BLUE)s">&nbsp;</td><td>Collagen</td></tr>
-            <tr><td>%(CHOICE_METHYL_GREEN)s</td><td bgcolor="%(COLOR_METHYL_GREEN)s">&nbsp;</td><td>Chromatin</td></tr>
-            <tr><td>%(CHOICE_METHYLENE_BLUE)s</td><td bgcolor="%(COLOR_METHYLENE_BLUE)s">&nbsp;</td><td>Nuclei</td></tr>
-            <tr><td>%(CHOICE_ORANGE_G)s</td><td bgcolor="%(COLOR_ORANGE_G)s">&nbsp;</td><td>Erythrocytes, pancreas, pituitary</td></tr>
-            <tr><td>%(CHOICE_PAS)s</td><td bgcolor="%(COLOR_PAS)s">&nbsp;</td><td>Glycogen, carbohydrates</td></tr>
-            <tr><td>%(CHOICE_PONCEAU_FUCHSIN)s</td><td bgcolor="%(COLOR_PONCEAU_FUCHSIN)s">&nbsp;</td><td>Red counterstain for Masson's trichrome</td></tr>
-            </table>
+            %(STAIN_TABLE)s
             <br>
             (Information taken from <a href="http://en.wikipedia.org/wiki/Histology#Staining">here</a>,
             <a href="http://en.wikipedia.org/wiki/Staining">here</a>, and
@@ -289,7 +335,8 @@ class UnmixColors(cpm.CPModule):
     
     def settings(self):
         '''The settings as saved to or loaded from the pipeline'''
-        result = [ self.stain_count, self.input_image_name]
+        result = [ self.stain_count, self.input_image_name, self.method,
+                   self.second_output_image]
         for output in self.outputs:
             result += [output.image_name, output.stain_choice,
                        output.red_absorbance, output.green_absorbance,
@@ -298,8 +345,14 @@ class UnmixColors(cpm.CPModule):
     
     def visible_settings(self):
         '''The settings visible to the user'''
-        result = [ self.input_image_name ]
-        for output in self.outputs:
+        result = [ self.input_image_name, self.method ]
+        if self.method == METHOD_TWO_COLOR_UNMIXING:
+            self.outputs[0].image_name.text = FIRST_OUTPUT_IMAGE
+            outputs = self.outputs[:1]
+        else:
+            self.outputs[0].image_name.text = NAME_THE_OUTPUT_NAME
+            outputs = self.outputs
+        for output in outputs:
             if output.can_remove:
                 result += [output.divider]
             result += [output.image_name, output.stain_choice]
@@ -308,7 +361,10 @@ class UnmixColors(cpm.CPModule):
                             output.blue_absorbance, output.estimator_button]
             if output.can_remove:
                 result += [output.remover]
-        result += [self.add_image_button]
+        if self.method == METHOD_CHOOSE_STAINS:
+            result += [self.add_image_button]
+        else:
+            result += [self.second_output_image]
         return result
     
     def run(self, workspace):
@@ -320,8 +376,11 @@ class UnmixColors(cpm.CPModule):
         if self.show_window:
             workspace.display_data.input_image = input_pixels
             workspace.display_data.outputs = {}
-        for output in self.outputs:
-            self.run_on_output(workspace, input_image, output)
+        if self.method == METHOD_TWO_COLOR_UNMIXING:
+            self.run_two_color_unmixing(workspace, input_image)
+        else:
+            for output in self.outputs:
+                self.run_on_output(workspace, input_image, output)
             
     def run_on_output(self, workspace, input_image, output):
         '''Produce one image - storing it in the image set'''
@@ -358,16 +417,64 @@ class UnmixColors(cpm.CPModule):
         workspace.image_set.add(image_name, output_image)
         if self.show_window:
             workspace.display_data.outputs[image_name] = image
+            
+    def run_two_color_unmixing(self, workspace, input_image):
+        '''Perform PCA-based two-color unmixing on the input image
+        
+        workspace - workspace for the analysis
+        
+        input_image - an RGB image to be unmixed.
+        '''
+        eps = 1.0 / 256.0 / 2.0
+        mask = input_image.mask
+        input_pixels = input_image.pixel_data
+        features = np.column_stack([input_pixels[mask, i] for i in range(3)])
+        log_features = np.log(features + eps)
+        pca = PCA(n_components=2)
+        pca.fit(log_features)
+        intensity, fraction = pca.transform(log_features).transpose()
+        def normalize(a):
+            a_min = np.percentile(a, 1)
+            a_max = np.percentile(a, 99)
+            eps = (a_max - a_min) / 98
+            a_min -= eps
+            a_max += eps
+            output = (a - a_min) / (a_max - a_min)
+            output[(output < 0)] = 0
+            output[(output > 1)] = 1
+            return output
+
+        absorbences = np.array(self.get_absorbances(self.outputs[0]))
+        intensity =  normalize(intensity)
+        fraction = normalize(fraction)
+        if np.dot(pca.components_[1], absorbences) > 0:
+            fraction = 1 - fraction
+        if np.dot(pca.components_[0], absorbences) > 0:
+            intensity = 1 - intensity
+        first_image_name = self.outputs[0].image_name.value
+        second_image_name = self.second_output_image.value
+        for image_name, f in ((first_image_name, fraction),
+                              (second_image_name, 1-fraction)):
+            pixels = np.zeros(input_pixels.shape[:2], input_pixels.dtype)
+            pixels[mask] = f * intensity
+            output_image = cpi.Image(pixels, parent_image = input_image)
+            workspace.image_set.add(image_name, output_image)
+            if self.show_window:
+                workspace.display_data.outputs[image_name] = pixels
         
     def display(self, workspace, figure):
         '''Display all of the images in a figure'''
-        figure.set_subplots((len(self.outputs)+1, 1))
+        if self.method == METHOD_CHOOSE_STAINS:
+            image_names = [output.image_name.value for output in outputs]
+        else:
+            image_names = [self.outputs[0].image_name.value,
+                           self.second_output_image.value]
+        figure.set_subplots((len(image_names)+1, 1))
         input_image = workspace.display_data.input_image
         figure.subplot_imshow_color(0,0, input_image,
                                     title = self.input_image_name.value)
         ax = figure.subplot(0,0)
-        for i, output in enumerate(self.outputs):
-            image_name = output.image_name.value
+        for i, image_name in enumerate(image_names):
             pixel_data = workspace.display_data.outputs[image_name]
             figure.subplot_imshow_grayscale(i+1, 0, pixel_data,
                                             title = image_name,
@@ -475,6 +582,16 @@ class UnmixColors(cpm.CPModule):
             setting_values = new_setting_values
             from_matlab = False
             variable_revision_number = 2
+        if variable_revision_number == 2:
+            #
+            # Added method and second stain
+            #
+            setting_values = \
+                setting_values[:FIXED_SETTING_COUNT_V2] + \
+                [METHOD_CHOOSE_STAINS, "Eosin"] + \
+                setting_values[FIXED_SETTING_COUNT_V2:]
+                    
+            variable_revision_number = 3
             
         return setting_values, variable_revision_number, from_matlab
     

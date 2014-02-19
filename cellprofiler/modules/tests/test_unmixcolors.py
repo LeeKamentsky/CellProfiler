@@ -114,6 +114,7 @@ UnmixColors:[module_num:1|svn_version:\'Unknown\'|variable_revision_number:2|sho
         module = pipeline.modules()[0]
         self.assertTrue(isinstance(module, U.UnmixColors))
         self.assertEqual(module.input_image_name, "Color")
+        self.assertEqual(module.method, U.METHOD_CHOOSE_STAINS)
         self.assertEqual(module.stain_count.value, 13)
         self.assertEqual(module.outputs[0].image_name, "Hematoxylin")
         self.assertEqual(module.outputs[-1].image_name, "RedWine")
@@ -127,6 +128,73 @@ UnmixColors:[module_num:1|svn_version:\'Unknown\'|variable_revision_number:2|sho
         self.assertAlmostEqual(module.outputs[-1].green_absorbance.value, .2)
         self.assertAlmostEqual(module.outputs[-1].blue_absorbance.value, .3)
         
+    def test_01_03_load_v3(self):
+        data = r"""CellProfiler Pipeline: http://www.cellprofiler.org
+Version:3
+DateRevision:20140219141600
+GitHash:8e5019f
+ModuleCount:2
+HasImagePlaneDetails:False
+
+UnmixColors:[module_num:1|svn_version:\'Unknown\'|variable_revision_number:3|show_window:True|notes:\x5B\x5D|batch_state:array(\x5B\x5D, dtype=uint8)|enabled:True]
+    Stain count:1
+    Select the input color image:Color
+    Unmixing method:Two-color unmixing
+    Second output image:Eosin1
+    First output image:Hematoxylin1
+    Stain:Hematoxylin
+    Red absorbance:0.4
+    Green absorbance:0.5
+    Blue absorbance:0.6
+
+UnmixColors:[module_num:2|svn_version:\'Unknown\'|variable_revision_number:3|show_window:True|notes:\x5B\x5D|batch_state:array(\x5B\x5D, dtype=uint8)|enabled:True]
+    Stain count:2
+    Select the input color image:Color5
+    Unmixing method:Choose stains
+    Second output image:Eosin
+    Name the output name:Hematoxylin1
+    Stain:Hematoxylin
+    Red absorbance:0.7
+    Green absorbance:0.8
+    Blue absorbance:0.9
+    Name the output name:Eosin1
+    Stain:Eosin
+    Red absorbance:0.1
+    Green absorbance:0.2
+    Blue absorbance:0.3
+
+"""
+        pipeline = cpp.Pipeline()
+        def callback(caller, event):
+            self.assertFalse(isinstance(event, cpp.LoadExceptionEvent))
+        pipeline.add_listener(callback)
+        pipeline.load(StringIO(data))
+        self.assertEqual(len(pipeline.modules()), 2)
+        module = pipeline.modules()[0]
+        self.assertTrue(isinstance(module, U.UnmixColors))
+        self.assertEqual(module.input_image_name, "Color")
+        self.assertEqual(module.method, U.METHOD_TWO_COLOR_UNMIXING)
+        self.assertEqual(module.outputs[0].image_name, "Hematoxylin1")
+        self.assertEqual(module.second_output_image, "Eosin1")
+        self.assertEqual(module.outputs[0].stain_choice, U.CHOICE_HEMATOXYLIN)
+        self.assertEqual(module.outputs[0].red_absorbance, .4)
+        self.assertEqual(module.outputs[0].green_absorbance, .5)
+        self.assertEqual(module.outputs[0].blue_absorbance, .6)
+        
+        module = pipeline.modules()[1]
+        self.assertTrue(isinstance(module, U.UnmixColors))
+        self.assertEqual(module.input_image_name, "Color5")
+        self.assertEqual(module.method, U.METHOD_CHOOSE_STAINS)
+        self.assertEqual(len(module.outputs), 2)
+        for output, image_name, stain_choice, r, g, b in (
+            (module.outputs[0], "Hematoxylin1", U.CHOICE_HEMATOXYLIN, .7, .8, .9),
+            (module.outputs[1], "Eosin1", U.CHOICE_EOSIN, .1, .2, .3)):
+            self.assertEqual(output.image_name, image_name)
+            self.assertEqual(output.stain_choice, stain_choice)
+            self.assertEqual(output.red_absorbance, r)
+            self.assertEqual(output.green_absorbance, g)
+            self.assertEqual(output.blue_absorbance, b)
+             
     def make_workspace(self, pixels, choices):
         '''Make a workspace for running UnmixColors
         
@@ -236,4 +304,24 @@ UnmixColors:[module_num:1|svn_version:\'Unknown\'|variable_revision_number:2|sho
         image = workspace.image_set.get_image(output_image_name(0))
         np.testing.assert_almost_equal(image.pixel_data, expected, 2)
         
+    def test_02_06_two_color(self):
+        r = np.random.RandomState()
+        r.seed(26)
+        intensities = r.uniform(size=(20, 20, 2))
+        color1 = np.array(U.ST_HEMATOXYLIN)
+        color2 = np.array(U.ST_EOSIN)
+        
+        img1, img2 = [ 
+            c[np.newaxis, np.newaxis, :] +
+            (1 - intensity[:, :, np.newaxis]) * (1 - c[np.newaxis, np.newaxis, :])
+            for intensity, c in ((intensities[:, :, 0], color1),
+                                 (intensities[:, :, 1], color2))]
+        img = np.exp(img1 + img2)
+        workspace, module = self.make_workspace(img, [U.CHOICE_HEMATOXYLIN])
+        assert isinstance(module, U.UnmixColors)
+        module.method.value = U.METHOD_TWO_COLOR_UNMIXING
+        module.second_output_image.value = output_image_name(1)
+        module.run(workspace)
+        img1 = workspace.image_set.get_image(output_image_name(0)).pixel_data
+        img2 = workspace.image_set.get_image(output_image_name(1)).pixel_data
         
