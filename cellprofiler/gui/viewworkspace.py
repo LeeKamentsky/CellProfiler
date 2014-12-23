@@ -185,6 +185,7 @@ class VWObjectsRow(VWRow):
         object_set = self.vw.workspace.object_set
         objects = object_set.get_objects(name)
         self.data.labels = [l for l, i in objects.get_labels()]
+<<<<<<< HEAD
         
 class VWMaskRow(VWRow):
     '''A row of controls for controlling masks'''
@@ -213,6 +214,8 @@ class VWMaskRow(VWRow):
         image_set = self.vw.workspace.image_set
         image = image_set.get_image(name)
         self.data.mask = image.mask
+=======
+>>>>>>> db0346ff0a3ab85bebde172be65386af1b828014
         
 class ViewWorkspace(object):
     C_CHOOSER = 0
