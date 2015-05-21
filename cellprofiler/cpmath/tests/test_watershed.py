@@ -401,17 +401,19 @@ class TestFastWatershed(unittest.TestCase):
         image = numpy.zeros((21, 21))
         markers = numpy.zeros((21, 21), int)
         markers[5, 5] = 1
-        markers[5, 10] = 2
-        markers[10, 5] = 3
-        markers[10, 10] = 4
+        markers[5, 15] = 2
+        markers[15, 5] = 3
+        markers[15, 15] = 4
 
-        structure = numpy.array([[False, True, False],
+        structure = numpy.array([[True, True, True],
                               [True, True, True],
-                              [False, True, False]])
-        out = fast_watershed(image, markers, structure)
-        i, j = numpy.mgrid[0:21, 0:21]
-        d = numpy.dstack(
-            [numpy.sqrt((i.astype(float)-i0)**2, (j.astype(float)-j0)**2)
-             for i0, j0 in ((5, 5), (5, 10), (10, 5), (10, 10))])
-        dmin = numpy.min(d, 2)
-        self.assertTrue(numpy.all(d[i, j, out[i, j]-1] == dmin))
+                              [True, True, True]])
+        for use_insertion_age in True, False:
+            out = fast_watershed(image, markers, structure,
+                                 use_insertion_age= use_insertion_age)
+            i, j = numpy.mgrid[0:21, 0:21]
+            d = numpy.dstack(
+                [numpy.sqrt((i.astype(float)-i0)**2, (j.astype(float)-j0)**2)
+                 for i0, j0 in ((5, 5), (5, 15), (15, 5), (15, 15))])
+            dmin = numpy.min(d, 2)
+            self.assertTrue(numpy.all(d[i, j, out[i, j]-1] == dmin))

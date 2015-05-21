@@ -80,7 +80,8 @@ def __heapify_markers(markers,image):
         pq = numpy.zeros((0,markers.ndim+3),int)
     return (pq,ncoords)
     
-def watershed(image, markers, connectivity=None, offset=None, mask=None):
+def watershed(image, markers, connectivity=None, offset=None, mask=None,
+              use_insertion_age=False):
     """Return a matrix labeled using the watershed algorithm
     
     image - an array where the lowest value points are
@@ -183,6 +184,7 @@ def watershed(image, markers, connectivity=None, offset=None, mask=None):
             c.append(offs)
             distances.append(d)
     c = numpy.array(c,numpy.int32)
+    c = c[numpy.argsort(distances)]
 
     pq, age = __heapify_markers(c_markers, c_image)
     pq = numpy.ascontiguousarray(pq,dtype=numpy.int32)
@@ -199,7 +201,8 @@ def watershed(image, markers, connectivity=None, offset=None, mask=None):
                              c_image.ndim, 
                              c_mask,
                              numpy.array(c_image.shape,numpy.int32),
-                             c_output)
+                             c_output,
+                             use_insertion_age)
     c_output = c_output.reshape(c_image.shape)[[slice(1,-1,None)] * image.ndim]
     try:
         return c_output.astype(markers.dtype)

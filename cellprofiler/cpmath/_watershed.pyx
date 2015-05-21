@@ -35,7 +35,8 @@ def watershed(np.ndarray[DTYPE_INT32_t,ndim=1,negative_indices=False, mode='c'] 
               DTYPE_INT32_t ndim,
               np.ndarray[DTYPE_BOOL_t,ndim=1,negative_indices=False, mode='c'] mask,
               np.ndarray[DTYPE_INT32_t,ndim=1,negative_indices=False, mode='c'] image_shape,
-              np.ndarray[DTYPE_INT32_t,ndim=1,negative_indices=False, mode='c'] output):
+              np.ndarray[DTYPE_INT32_t,ndim=1,negative_indices=False, mode='c'] output,
+              DTYPE_BOOL_t use_insertion_age):
     """Do heavy lifting of watershed algorithm
     
     image - the flattened image pixels, converted to rank-order
@@ -106,10 +107,14 @@ def watershed(np.ndarray[DTYPE_INT32_t,ndim=1,negative_indices=False, mode='c'] 
                 continue
 
             new_elem.value   = image[index]
-            if new_elem.value > elem.value:
+            if use_insertion_age:
                 new_elem.age = age
+                age += 1
             else:
-                new_elem.age = elem.age + age_modulo + structure[i, 1]
+                if new_elem.value > elem.value:
+                    new_elem.age = age
+                else:
+                    new_elem.age = elem.age + age_modulo + structure[i, 1]
             new_elem.index   = index
             output[index] = output[old_index]
             #
