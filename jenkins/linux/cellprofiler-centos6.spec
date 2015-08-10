@@ -36,7 +36,7 @@ BuildRequires: cellprofiler-pysqlite cellprofiler-setuptools
 BuildRequires: cellprofiler-wxpython cellprofiler-pyzmq cellprofiler-jdk
 BuildRequires: cellprofiler-javabridge = %{javabridge_version} 
 BuildRequires: cellprofiler-nose cellprofiler-bioformats = %{bioformats_version}
-BuildRequires: cellprofiler-cellh5
+BuildRequires: cellprofiler-cellh5 cellprofiler-objgraph
 
 %description
 Cell image analysis software
