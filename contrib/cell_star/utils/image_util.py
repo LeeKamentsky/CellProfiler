@@ -52,7 +52,8 @@ def get_circle_kernel(radius):
     @param radius: radius of the circle
     """
     epsilon = 0.00000001
-    y, x = np.ogrid[-radius:radius + epsilon, -radius:radius + epsilon]
+    y, x = np.mgrid[np.ceil(-radius):np.floor(radius + epsilon)+1,
+                    np.ceil(-radius):np.floor(radius + epsilon)+1]
     return x ** 2 + y ** 2 <= radius ** 2
 
 
@@ -134,7 +135,7 @@ def fill_holes(mask, kernel_size, minimal_hole_size):
         components, num_components = sp.ndimage.label(np.logical_not(new_mask), np.ones((3, 3)))
         slices = sp.ndimage.find_objects(components)
         for label, slice in zip(range(1, num_components + 1), slices):
-            slice = extend_slices(slice,kernel_size+1000)
+            slice = extend_slices(slice,kernel_size+morphology_element.shape[0]*2)
             components_slice = components[slice] == label
             # filter small components
             if np.count_nonzero(components_slice) < minimal_hole_size:

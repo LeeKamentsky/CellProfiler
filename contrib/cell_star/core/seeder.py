@@ -28,6 +28,52 @@ class Seeder(object):
         origin = 'cluster'
         if len(seeds) > 0:
             origin = seeds[0].origin
+        seeds = np.array(map(lambda s: (s.x, s.y), seeds))
+        my_inf =\
+            np.inf if seeds.dtype.kind == 'f' else np.iinfo(seeds.dtype).max
+        while True:
+            #
+            # find p1 and p2 closest to each other - p1 is closest to p2
+            # and p2 is closest to p1
+            #
+            p1 = np.arange(seeds.shape[0])
+            d = seeds[:, np.newaxis, :] - seeds[np.newaxis, :, :]
+            d2 = np.sum(d * d, 2)
+            d2[p1, p1] = my_inf
+            p2 = np.argmin(d2, 0)
+            #
+            # Eliminate p1 / p2 if p1 is closest to p2 and p2 is closest to
+            # someone else
+            #
+            good = p1 == p2[p2]
+            p1, p2 = p1[good], p2[good]
+            #
+            # Eliminate p1 / p2 if p1 > p2 (get rid of (2, 1) since there is
+            # a (1, 2)
+            #
+            good = p1 < p2
+            p1, p2 = p1[good], p2[good]
+            #
+            # Eliminate p1 / p2 if < self.cluster_min_distance
+            #
+            good = d2[p1, p2] < self.cluster_min_distance
+            p1, p2 = p1[good], p2[good]
+            if len(p1) == 0:
+                break
+            #
+            # coalesce
+            #
+            new_seeds = (seeds[p1, :] + seeds[p2, :]) / 2
+            to_keep = np.ones(seeds.shape[0], bool)
+            to_keep[p1] = False
+            to_keep[p2] = False
+            seeds = np.vstack((seeds[to_keep, :], new_seeds))
+        return point_list_as_seeds(seeds, origin)
+        
+    def slow_cluster_seeds(self, seeds):
+        origin = 'cluster'
+        if len(seeds) > 0:
+            origin = seeds[0].origin
         seeds = map(lambda s: (s.x, s.y), seeds)
         # Distance matrix
         distance_matrix = square_form(pdist(seeds, 'euclidean'))
